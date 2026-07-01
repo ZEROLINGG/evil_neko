@@ -1,21 +1,24 @@
+#lib/Cargo.toml
 [package]
 name = "lib"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+libpm = { path = "proc-macro", default-features = false }
 anyhow = "1"
-obfstr = "0.4"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "process"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "process", "io-util", "sync"] }
 
 regex = { version = "1.12", optional = true}
 portable-pty = { version = "0.9", optional = true}
 serde = { version = "1.0.228", features = ["derive"] }
+tlsh2 = { version = "1.1.0", optional = true, features = ["diff","fast"] }
 
+image = { version = "0.25.10", default-features = false, features = ["png","bmp","jpeg"], optional = true }
+futures-core = { version = "0.3.32", optional = true}
+async-stream = { version = "0.3.6", optional = true}
+tokio-stream = { version = "0.1.18", optional = true}
 
-
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_System_Threading", "Win32_Foundation"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -26,20 +29,38 @@ libc = "0.2"
 default = [
     "ppty",
     "sandbox",
+    "macros"
 ]
 ppty = [
     "dep:regex",
-    "tokio/process",
-    "tokio/io-util",
-    "tokio/sync",
 ]
 pty = [
     "dep:portable-pty"
 ]
 sandbox = [
     "tokio/fs",
+    "dep:tlsh2",
+    "dep:image",
+    "dep:regex"
 ]
+macros = [
+    "macros-junk",
+    "macros-s1",
+    "macros-s2",
+    "macros-buf"
+]
+macros-junk = ["libpm/junk"]
 
+macros-s1 = ["libpm/s1"]
+macros-s2 = ["libpm/s2", "macros-buf"]
+
+macros-buf = [
+    "libpm/buf",
+    "dep:image",
+    "dep:futures-core",
+    "dep:async-stream",
+    "dep:tokio-stream"
+]
 
 [profile.release]
 strip = "symbols"

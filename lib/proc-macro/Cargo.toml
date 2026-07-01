@@ -1,0 +1,52 @@
+#lib/proc-macro/Cargo.toml
+[package]
+name = "libpm"
+version = "0.1.0"
+edition = "2024"
+
+
+[lib]
+proc-macro = true
+
+[dependencies]
+quote = "1.0.45"
+syn = { version = "2.0", features = ["full", "clone-impls"] }
+proc-macro2 = "1.0.106"
+rand = "0.10"
+
+include = { path = "include" }
+
+image = { version = "0.25.10", default-features = false, features = ["png","bmp"], optional = true }
+include_dir = { version = "0.7.4", optional = true}
+tokio = { version = "1", features = ["sync"], optional = true }
+futures-core = { version = "0.3.32" , optional = true }
+async-stream = { version = "0.3.6", optional = true}
+tokio-stream = { version = "0.1.18", optional = true}
+
+
+[features]
+default = [
+    "junk",
+    "s1",
+    "s2",
+    "buf",
+]
+junk = []
+image = [
+    "dep:image"
+]
+buf = [
+    "image",
+    "dep:include_dir",
+    "dep:tokio",
+    "dep:futures-core",
+    "dep:async-stream",
+    "dep:tokio-stream"
+]
+s1 = []
+s2 = [
+    "buf"
+]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

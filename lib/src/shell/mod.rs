@@ -1,20 +1,24 @@
 //lib/src/shell/mod.rs
 #![allow(unused)]
-mod ppty;
+#![cfg(feature = "ppty")]
+#![cfg(feature = "pty")]
+pub mod  ppty;
 mod pty;
 
+#[libpm::rt]
 use anyhow::{Result, anyhow};
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::process::Command;
-use crate::{s,ss,s_fmt};
+use libpm::{s, ss};
 
 
 static SHELL_NAME_REGEX: OnceLock<regex::Regex> = OnceLock::new();
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
+
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 #[derive(Debug)]

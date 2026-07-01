@@ -1,6 +1,7 @@
 //src/shell/ppty.rs
 #![cfg(feature = "ppty")]
 #![allow(unused)]
+#[libpm::rt]
 use anyhow::{anyhow, ensure, Result};
 use std::future::Future;
 use std::pin::Pin;
@@ -10,11 +11,11 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{mpsc, oneshot, Mutex, Notify};
 use tokio::task::JoinHandle;
-use crate::{s,ss,s_fmt};
 
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
+use libpm::{s, ss};
 use crate::shell::normalize_shell_name;
 
 #[cfg(windows)]
