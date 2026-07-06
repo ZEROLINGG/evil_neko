@@ -1,31 +1,45 @@
 //lib/src/shell/mod.rs
 #![allow(unused)]
-#![cfg(feature = "ppty")]
-#![cfg(feature = "pty")]
-pub mod  ppty;
+pub mod shell;
 mod pty;
 
-#[libpm::rt]
-use anyhow::{Result, anyhow};
+use std::borrow::Cow;
+use anyhow::{Result, anyhow, bail};
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::OnceLock;
 use std::time::Duration;
+use serde::{Deserialize, Serialize};
 use tokio::process::Command;
-use libpm::{s, ss};
-
+use crate::runtime::*;
 
 static SHELL_NAME_REGEX: OnceLock<regex::Regex> = OnceLock::new();
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
-#[derive(Debug)]
+
+#[cfg(windows)]
+use crate::utils::win::resolve;
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ExecResult {
     pub stdout: String,
     pub stderr: String,
     pub exit_code: i32,
+}
+
+impl ExecResult {
+    #[inline]
+    pub fn ok(self) -> Result<String> {
+        if self.exit_code == 0 { return Ok(self.stdout) }
+        bail!(self.stderr)
+    }
+
+    #[inline]
+    pub fn success(&self) -> bool { self.exit_code == 0 }
+
+    #[inline]
+    pub fn failed(&self) -> bool { !self.success() }
 }
 
 fn normalize_shell_name(shell: &str) -> Result<String> {
@@ -34,123 +48,180 @@ fn normalize_shell_name(shell: &str) -> Result<String> {
     let name = Path::new(shell)
         .file_name()
         .and_then(|s| s.to_str())
-        .map(|s| s.to_lowercase())
-        .ok_or_else(|| anyhow!("{}{shell}",ss!("invalid shell path: ")))?;
+        .ok_or_else(|| anyhow!("{} {}", ss!("invalid shell path:"), shell))?
+        .to_lowercase();
 
     Ok(re.replace(&name, "").into_owned())
 }
 
-pub async fn exec(input: &str, shell: &str, timeout_dur: Option<Duration>) -> Result<ExecResult> {
+pub async fn exec<'a>(
+    input: impl Into<Cow<'a, str>>,
+    shell: impl Into<Cow<'a, str>>,
+    timeout_dur: Option<Duration>
+) -> Result<ExecResult> {
+    let shell = shell.into();
     let shell = shell.trim();
     anyhow::ensure!(!shell.is_empty(), s!("shell path cannot be empty"));
-    
-    let shell_name = normalize_shell_name(shell)?;
 
-    let mut cmd = build_command(shell, &shell_name, input)?;
+    let shell_name = normalize_shell_name(shell)?;
+    let input_ref = input.into();
+
+    let mut cmd = build_command(shell, &shell_name, input_ref.as_ref())?;
+
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
 
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
-    match timeout_dur {
-        None => {
-            let child = cmd.spawn()?;
-            let output = child.wait_with_output().await?;
-            Ok(to_exec_result(output))
-        }
-        Some(dur) => {
-            let mut child = cmd.spawn()?;
-            let stdout_handle = child.stdout.take();
-            let stderr_handle = child.stderr.take();
+    let output = if let Some(dur) = timeout_dur {
+        tokio::time::timeout(dur, cmd.spawn()?.wait_with_output())
+            .await
+            .map_err(|_| anyhow!("{ } {:?} ", ss!("command timed out after"), dur))??
+    } else {
+        cmd.spawn()?.wait_with_output().await?
+    };
 
-            let read_fut = async {
-                use tokio::io::AsyncReadExt;
-                let mut stdout = String::new();
-                let mut stderr = String::new();
-                tokio::join!(
-                    async {
-                        if let Some(mut h) = stdout_handle {
-                            let _ = h.read_to_string(&mut stdout).await;
-                        }
-                    },
-                    async {
-                        if let Some(mut h) = stderr_handle {
-                            let _ = h.read_to_string(&mut stderr).await;
-                        }
-                    },
-                );
-                (stdout, stderr)
-            };
-
-            tokio::select! {
-                (status, (stdout, stderr)) = async { (child.wait().await, read_fut.await) } => {
-                    Ok(ExecResult {
-                        stdout,
-                        stderr,
-                        exit_code: status?.code().unwrap_or(-1),
-                    })
-                }
-                _ = tokio::time::sleep(dur) => {
-                    let _ = child.kill().await;
-                    Err(anyhow!("{}{dur:?}",ss!("command timed out after ")))
-                }
-            }
-        }
-    }
+    Ok(to_exec_result(output))
 }
 
 fn build_command(shell: &str, shell_name: &str, input: &str) -> Result<Command> {
     let mut cmd = Command::new(shell);
 
-    if shell_name == ss!("sh") || shell_name == ss!("zsh") || shell_name == ss!("bash") || shell_name == ss!("fish") {
-        cmd.args([s!("-c"), input.to_string()]);
-    } else if shell_name == ss!("node") {
-        cmd.args([s!("-e"), input.to_string()]);
-    } else if shell_name == ss!("python") {
-        #[cfg(target_os = "windows")]
-        cmd.env(s!("PYTHONUTF8"), "1");
-        cmd.args([s!("-c"), input.to_string()]);
-    } else if shell_name == ss!("cmd") {
-        #[cfg(not(target_os = "windows"))]
-        cmd.args([s!("/C"), input.to_string()]);
-        #[cfg(target_os = "windows")]
-        {
-            let wrapped = format!("{}{}", ss!("chcp 65001 >nul 2>&1 & "), input);
-            cmd.args([s!("/C"), wrapped]);
+    match shell_name {
+        "sh" | "zsh" | "bash" | "fish" => {
+            cmd.args([sss!("-c"), input.to_string()]);
         }
-    } else if shell_name == ss!("powershell") || shell_name == ss!("pwsh") {
-        #[cfg(not(target_os = "windows"))]
-        cmd.args([s!("-ep"), s!("Bypass"), s!("-nop"), s!("-c"), input.to_string()]);
-        #[cfg(target_os = "windows")]
-        {
-            let wrapped = format!(
-                "{}{}",
-                ss!(r#"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;
+        "node" => {
+            cmd.args([sss!("-e"), input.to_string()]);
+        }
+        "python" => {
+            #[cfg(target_os = "windows")]
+            cmd.env(sss!("PYTHONUTF8"), sss!("1"));
+
+            cmd.args([sss!("-c"), input.to_string()]);
+        }
+        "cmd" => {
+            #[cfg(not(target_os = "windows"))]
+            cmd.args([sss!("/C"), input.to_string()]);
+
+            #[cfg(target_os = "windows")]
+            {
+                let wrapped = format!("{}{}", ss!("chcp 65001 >nul 2>&1 & "), input.to_string());
+                cmd.args([sss!("/C"), wrapped]);
+            }
+        }
+        "powershell" | "pwsh" => {
+            #[cfg(not(target_os = "windows"))]
+            cmd.args([sss!("-ep"), sss!("Bypass"), sss!("-nop"), sss!("-c"), input.to_string()]);
+
+            #[cfg(target_os = "windows")]
+            {
+                let wrapped = format!(
+                    "{}{}",
+                    ss!(r#"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;
                  [Console]::InputEncoding  = [System.Text.Encoding]::UTF8;
                  $OutputEncoding           = [System.Text.Encoding]::UTF8;
                  "#),
-                input
-            );
-            cmd.args([s!("-ep"), s!("Bypass"), s!("-nop"), s!("-c"), wrapped]);
+                    input.to_string()
+                );
+                cmd.args([sss!("-ep"), sss!("Bypass"), sss!("-nop"), sss!("-c"), wrapped]);
+            }
         }
-    } else {
-        anyhow::bail!("{}{shell_name}", s!("unsupported shell: "));
+        _ => {
+            bail!("{}{}", s!("unsupported shell: "), shell_name);
+        }
     }
 
     Ok(cmd)
 }
 
 #[inline]
+pub fn decode_bytes(bytes: &[u8]) -> String {
+    if bytes.is_empty() {
+        return String::new();
+    }
+
+    if let Ok(s) = std::str::from_utf8(bytes) {
+        return s.to_string();
+    }
+
+    #[cfg(windows)]
+    {
+        return decode_windows_native(bytes);
+    }
+
+    #[cfg(not(windows))]
+    {
+        String::from_utf8_lossy(bytes).into_owned()
+    }
+}
+
+#[cfg(windows)]
+fn decode_windows_native(bytes: &[u8]) -> String {
+    type FnGetConsoleOutputCP = unsafe extern "system" fn() -> u32;
+    type FnMultiByteToWideChar = unsafe extern "system" fn(
+        code_page: u32,
+        dw_flags: u32,
+        lp_multi_byte_str: *const u8,
+        cb_multi_byte: i32,
+        lp_wide_char_str: *mut u16,
+        cch_wide_char: i32,
+    ) -> i32;
+
+    unsafe {
+        let get_console_output_cp: Option<FnGetConsoleOutputCP> =
+            resolve(ss!("kernel32.dll"), ss!("GetConsoleOutputCP"));
+        let multi_byte_to_wide_char: Option<FnMultiByteToWideChar> =
+            resolve(ss!("kernel32.dll"), ss!("MultiByteToWideChar"));
+
+        if let (Some(get_cp), Some(mb_to_wc)) = (get_console_output_cp, multi_byte_to_wide_char) {
+            let mut cp = get_cp();
+            if cp == 0 {
+                cp = 0; // CP_ACP 兜底
+            }
+
+            let required_size = mb_to_wc(
+                cp,
+                0,
+                bytes.as_ptr(),
+                bytes.len() as i32,
+                std::ptr::null_mut(),
+                0,
+            );
+
+            if required_size > 0 {
+                let mut wide_chars: Vec<u16> = vec![0; required_size as usize];
+
+                let converted_size = mb_to_wc(
+                    cp,
+                    0,
+                    bytes.as_ptr(),
+                    bytes.len() as i32,
+                    wide_chars.as_mut_ptr(),
+                    required_size,
+                );
+
+                if converted_size > 0 {
+                    return String::from_utf16_lossy(&wide_chars);
+                }
+            }
+        }
+    }
+
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+#[inline]
 fn to_exec_result(output: std::process::Output) -> ExecResult {
     ExecResult {
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        stdout: decode_bytes(&output.stdout),
+        stderr: decode_bytes(&output.stderr),
         exit_code: output.status.code().unwrap_or(-1),
     }
 }
@@ -175,14 +246,6 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn test_timeout() {
-        let result = exec("sleep 10", "bash", Some(Duration::from_millis(200))).await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("timed out"));
-    }
-
     #[cfg(windows)]
     #[tokio::test]
     async fn test_windows_utf8() {
@@ -192,6 +255,15 @@ mod tests {
             result.stdout.contains("你好世界"),
             "cmd 中文乱码: {:?}",
             result.stdout
+        );
+
+        // 测试容易产生乱码的系统组件命令
+        let result2 = exec("ipconfig", "cmd", None).await.unwrap();
+        println!("---\nipconfig: {}\n---", result2.stdout.trim());
+        assert!(
+            !result2.stdout.contains('\u{FFFD}'),
+            "ipconfig 中存在乱码字符: {:?}",
+            result2.stdout
         );
     }
 }

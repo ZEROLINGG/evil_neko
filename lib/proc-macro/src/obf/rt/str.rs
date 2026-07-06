@@ -4,27 +4,28 @@
 #![cfg(any(feature = "s1", feature = "s2"))]
 // str运行时
 
-
 pub trait Str:
-::std::ops::Deref<Target = str>
-+ ::std::convert::AsRef<str>
-+ ::std::convert::AsRef<[u8]>
-+ ::std::convert::AsRef<::std::path::Path>
-+ ::std::fmt::Display
-+ ::std::fmt::Debug
-+ ::std::cmp::Eq
-+ ::std::cmp::Ord
-+ ::std::cmp::PartialEq<str>
-+ for<'a> ::std::cmp::PartialEq<&'a str>
-+ ::std::cmp::PartialEq<::std::string::String>
-+ ::std::hash::Hash
-+ ::std::borrow::Borrow<str>
-+ Send
-+ Sync
+    ::std::ops::Deref<Target = str>
+    + ::std::convert::AsRef<str>
+    + ::std::convert::AsRef<[u8]>
+    + ::std::convert::AsRef<::std::path::Path>
+    + ::std::fmt::Display
+    + ::std::fmt::Debug
+    + ::std::cmp::Eq
+    + ::std::cmp::Ord
+    + ::std::cmp::PartialEq<str>
+    + for<'a> ::std::cmp::PartialEq<&'a str>
+    + ::std::cmp::PartialEq<::std::string::String>
+    + ::std::hash::Hash
+    + ::std::borrow::Borrow<str>
+    + Send
+    + Sync
 {
     fn as_str(&self) -> &str;
     fn as_bytes(&self) -> &[u8];
-    fn concat<T: ::std::convert::AsRef<str>>(self, rhs: T) -> HeapStr where Self: Sized;
+    fn concat<T: ::std::convert::AsRef<str>>(self, rhs: T) -> HeapStr
+    where
+        Self: Sized;
 
     #[inline(always)]
     fn len(&self) -> usize {
@@ -41,7 +42,6 @@ pub struct HeapStr(pub ::std::vec::Vec<u8>);
 
 pub struct StackStr<const N: usize>(pub [u8; N]);
 
-
 impl HeapStr {
     #[inline(always)]
     pub fn new(src: impl ::std::convert::Into<Self>) -> Self {
@@ -53,7 +53,6 @@ impl HeapStr {
         let this = ::std::mem::ManuallyDrop::new(self);
         unsafe { ::std::ptr::read(&this.0) }
     }
-
 
     #[inline(always)]
     pub fn into_string(self) -> ::std::string::String {
@@ -92,7 +91,6 @@ impl<const N: usize> StackStr<N> {
 
     pub const CAPACITY: usize = N;
 
-
     #[inline(always)]
     pub fn into_bytes(self) -> [u8; N] {
         self.0
@@ -118,28 +116,32 @@ impl<const N: usize> Str for StackStr<N> {
     }
 }
 
-
 impl ::std::ops::Drop for HeapStr {
     #[inline(always)]
     fn drop(&mut self) {
         let cap = self.0.capacity();
-        unsafe { __secure_wipe(self.0.as_mut_ptr(), cap); }
+        unsafe {
+            __secure_wipe(self.0.as_mut_ptr(), cap);
+        }
     }
 }
 
 impl<const N: usize> ::std::ops::Drop for StackStr<N> {
     #[inline(always)]
     fn drop(&mut self) {
-        unsafe { __secure_wipe(self.0.as_mut_ptr(), N); }
+        unsafe {
+            __secure_wipe(self.0.as_mut_ptr(), N);
+        }
     }
 }
-
 
 impl<const N: usize> ::std::convert::From<&mut [u8; N]> for HeapStr {
     #[inline(always)]
     fn from(arr: &mut [u8; N]) -> Self {
         let v = arr.to_vec();
-        unsafe { __secure_wipe(arr.as_mut_ptr(), N); }
+        unsafe {
+            __secure_wipe(arr.as_mut_ptr(), N);
+        }
         HeapStr(v)
     }
 }
@@ -155,7 +157,9 @@ impl<const N: usize> ::std::convert::From<::std::boxed::Box<[u8; N]>> for HeapSt
     #[inline(always)]
     fn from(mut b: ::std::boxed::Box<[u8; N]>) -> Self {
         let v = b.to_vec();
-        unsafe { __secure_wipe(b.as_mut_ptr(), N); }
+        unsafe {
+            __secure_wipe(b.as_mut_ptr(), N);
+        }
         HeapStr(v)
     }
 }
@@ -182,7 +186,9 @@ impl ::std::convert::From<(*mut u8, usize)> for HeapStr {
         }
         // 调用方必须保证 ptr 和 len 指向有效的内存区域。
         let v = unsafe { ::std::slice::from_raw_parts(ptr, len) }.to_vec();
-        unsafe { __secure_wipe(ptr, len); }
+        unsafe {
+            __secure_wipe(ptr, len);
+        }
         HeapStr(v)
     }
 }
@@ -212,7 +218,9 @@ impl<const N: usize> ::std::convert::From<&mut [u8; N]> for StackStr<N> {
     #[inline(always)]
     fn from(arr: &mut [u8; N]) -> Self {
         let s = StackStr(*arr);
-        unsafe { __secure_wipe(arr.as_mut_ptr(), N); }
+        unsafe {
+            __secure_wipe(arr.as_mut_ptr(), N);
+        }
         s
     }
 }
@@ -222,7 +230,9 @@ impl<const N: usize> ::std::convert::From<::std::vec::Vec<u8>> for StackStr<N> {
         let mut arr = [0u8; N];
         let len = v.len().min(N);
         arr[..len].copy_from_slice(&v[..len]);
-        unsafe { __secure_wipe(v.as_mut_ptr(), v.capacity()); }
+        unsafe {
+            __secure_wipe(v.as_mut_ptr(), v.capacity());
+        }
         StackStr(arr)
     }
 }
@@ -230,7 +240,9 @@ impl<const N: usize> ::std::convert::From<::std::vec::Vec<u8>> for StackStr<N> {
 impl<const N: usize> ::std::convert::From<::std::boxed::Box<[u8; N]>> for StackStr<N> {
     fn from(mut b: ::std::boxed::Box<[u8; N]>) -> Self {
         let arr = *b;
-        unsafe { __secure_wipe(b.as_mut_ptr(), N); }
+        unsafe {
+            __secure_wipe(b.as_mut_ptr(), N);
+        }
         StackStr(arr)
     }
 }
@@ -255,7 +267,9 @@ impl<const N: usize> ::std::convert::From<(*mut u8, usize)> for StackStr<N> {
             let copy_len = len.min(N);
             let slice = unsafe { ::std::slice::from_raw_parts(ptr, copy_len) };
             arr[..copy_len].copy_from_slice(slice);
-            unsafe { __secure_wipe(ptr, len); }
+            unsafe {
+                __secure_wipe(ptr, len);
+            }
         }
         StackStr(arr)
     }
@@ -276,7 +290,6 @@ impl<const N: usize> ::std::str::FromStr for StackStr<N> {
     }
 }
 
-
 impl ::std::default::Default for HeapStr {
     #[inline(always)]
     fn default() -> Self {
@@ -290,7 +303,6 @@ impl<const N: usize> ::std::default::Default for StackStr<N> {
         StackStr([0u8; N])
     }
 }
-
 
 impl ::std::cmp::PartialEq for HeapStr {
     #[inline(always)]
@@ -425,7 +437,6 @@ impl<const N: usize> ::std::convert::From<StackStr<N>> for HeapStr {
     }
 }
 
-
 macro_rules! __impl_common_str_traits {
     ($name:ident $( <const $N:ident: usize> )?) => {
         impl $( <const $N: usize> )? ::std::clone::Clone for $name $( <$N> )? {
@@ -514,8 +525,6 @@ macro_rules! __impl_common_str_traits {
 
 __impl_common_str_traits!(HeapStr);
 __impl_common_str_traits!(StackStr <const N: usize>);
-
-
 
 #[cfg(test)]
 mod tests {

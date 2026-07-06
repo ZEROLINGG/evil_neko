@@ -8,7 +8,7 @@
 
 
 #[allow(unused)]
-use tokio_stream::StreamExt;
+pub use tokio_stream::StreamExt;
 
 /// 装箱的异步结果类型,绑定 Send,方便在多线程 tokio runtime 上调度
 pub type BoxFuture<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;

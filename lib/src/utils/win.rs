@@ -1,3 +1,4 @@
+// lib/src/utils/win.rs
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 #![allow(unused)]
@@ -5,8 +6,8 @@
 
 use std::ffi::{c_void, CString};
 use core::fmt;
-
-
+use std::sync::LazyLock;
+use crate::runtime::*;
 
 #[cfg(all(windows, target_arch = "x86"))]
 #[macro_export]

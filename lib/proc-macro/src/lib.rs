@@ -16,13 +16,13 @@ pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
     let item2 = proc_macro2::TokenStream::from(item);
 
     let args = if attr2.is_empty() {
-        quote! { crate = "::lib::__tokio" }
+        quote! { crate = "::lib::runtime::tokio" }
     } else {
-        quote! { crate = "::lib::__tokio", #attr2 }
+        quote! { crate = "::lib::runtime::tokio", #attr2 }
     };
 
     let expanded = quote! {
-        #[::lib::__tokio::main(#args)]
+        #[::lib::runtime::tokio::main(#args)]
         #item2
     };
     expanded.into()

@@ -9,14 +9,13 @@ pub mod emulator;
 pub mod virtual_machine;
 pub mod sandbox;
 
-#[libpm::rt(s1)]
 
 use std::borrow::Cow;
 use std::collections::{HashMap};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use libpm::*;
+use crate::runtime::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Debug)]
 pub enum ScoreType {

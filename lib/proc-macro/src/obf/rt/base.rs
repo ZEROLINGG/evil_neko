@@ -6,7 +6,7 @@
 
 
 // 垃圾填充生成时使用
-fn seed() -> u128 {
+pub fn seed() -> u128 {
     let now = ::std::time::Instant::now();
     let a = [0u8;1];
     let b = vec![0u8;1];
@@ -52,6 +52,16 @@ pub fn derive_u128<T: ::std::hash::Hash>(value: T) -> u128 {
     x
 }
 
+pub fn derive_string(mut seed: u128, len: usize) -> String {
+    let mut result = String::with_capacity(len);
+    for _ in 0..len {
+        seed = next_u128(seed);
+        let char_code = b'a' + (seed % 26) as u8;
+        result.push(char_code as char);
+    }
+    result
+}
+
 pub fn next_u8<T: Into<u8>>(x: T) -> u8 { derive_u128(x.into()) as u8 }
 pub fn next_u16<T: Into<u16>>(x: T) -> u16 { derive_u128(x.into()) as u16 }
 pub fn next_u32<T: Into<u32>>(x: T) -> u32 { derive_u128(x.into()) as u32 }
@@ -60,7 +70,7 @@ pub fn next_u128<T: Into<u128>>(x: T) -> u128 { derive_u128(x.into()) }
 
 // 安全擦除内存敏感数据
 #[inline(never)]
-unsafe fn __secure_wipe<T>(ptr: *mut T, len: usize) {
+pub unsafe fn __secure_wipe<T>(ptr: *mut T, len: usize) {
     if len == 0 || ptr.is_null() {
         return;
     }
@@ -77,7 +87,7 @@ unsafe fn __secure_wipe<T>(ptr: *mut T, len: usize) {
     );
 }
 
-trait ___RawPtr {
+pub trait ___RawPtr {
     fn into_u128(self) -> u128;
     fn from_u128(val: u128) -> Self;
 }
@@ -102,7 +112,7 @@ impl<T> ___RawPtr for *mut T {
 #[cold]
 #[doc(hidden)]
 #[allow(unused_qualifications)]
-fn __ptr_calc<P: ___RawPtr>(base: P, len: usize, seed: usize) -> P {
+pub fn __ptr_calc<P: ___RawPtr>(base: P, len: usize, seed: usize) -> P {
     #[inline(never)]
     #[doc(hidden)]
     #[allow(unused_qualifications)]

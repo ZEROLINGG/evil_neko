@@ -8,6 +8,7 @@ edition = "2024"
 libpm = { path = "proc-macro", default-features = false }
 anyhow = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "process", "io-util", "sync"] }
+rand = "0.10.2"
 
 regex = { version = "1.12", optional = true}
 portable-pty = { version = "0.9", optional = true}
@@ -19,6 +20,21 @@ futures-core = { version = "0.3.32", optional = true}
 async-stream = { version = "0.3.6", optional = true}
 tokio-stream = { version = "0.1.18", optional = true}
 
+aes-gcm = { version = "0.10", optional = true}
+aes-gcm-siv = { version = "0.11", optional = true}
+chacha20poly1305 = { version = "0.10", optional = true }
+
+lz4_flex    = { version = "0.13.1", optional = true}
+flate2      = { version = "1.1.9", optional = true}
+zstd        = { version = "0.13.3", optional = true}
+
+
+
+include = { path = "proc-macro/include" }
+
+sqlx = { version = "0.9", optional = true,features = ["sqlite", "postgres", "json"] }
+
+
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -27,11 +43,13 @@ libc = "0.2"
 
 [features]
 default = [
-    "ppty",
+    "shell",
     "sandbox",
-    "macros"
+    "macros",
+    "data-process",
+    "server-db"
 ]
-ppty = [
+shell = [
     "dep:regex",
 ]
 pty = [
@@ -50,10 +68,8 @@ macros = [
     "macros-buf"
 ]
 macros-junk = ["libpm/junk"]
-
 macros-s1 = ["libpm/s1"]
 macros-s2 = ["libpm/s2", "macros-buf"]
-
 macros-buf = [
     "libpm/buf",
     "dep:image",
@@ -61,6 +77,19 @@ macros-buf = [
     "dep:async-stream",
     "dep:tokio-stream"
 ]
+data-process = [
+    "dep:aes-gcm",
+    "dep:aes-gcm-siv",
+    "dep:chacha20poly1305",
+    "dep:lz4_flex",
+    "dep:flate2",
+    "dep:zstd"
+]
+
+server-db = [
+    "dep:sqlx"
+]
+
 
 [profile.release]
 strip = "symbols"

@@ -1,12 +1,21 @@
+// lib/src/utils/mod.rs
 #![allow(unused)]
-#[libpm::rt(s1)]
-use libpm::*;
 
+use std::fmt::{Display, Formatter};
+use std::path::PathBuf;
+use serde::{Deserialize, Serialize};
+use crate::runtime::*;
+
+#[cfg(windows)]
 pub mod win;
 pub mod sys;
+mod awk;
+pub mod tlsh;
 
 #[cfg(windows)]
 use win::{resolve, win_fn, win_types};
+use crate::utils::sys::info;
+
 
 #[cfg(target_os = "windows")]
 pub fn get_running_processes() -> Vec<String> {
@@ -176,7 +185,7 @@ pub fn get_parent_process() -> Option<String> {
 #[cfg(target_os = "linux")]
 pub fn get_parent_process() -> Option<String> {
     use std::process;
-    let pid = process::id();
+    let pid = std::process::id();
     let status = std::fs::read_to_string(format!("/proc/{}/status", pid)).ok()?;
 
     for line in status.lines() {
@@ -254,3 +263,5 @@ pub fn get_running_processes() -> Vec<String> {
         .filter(|s| !s.is_empty())
         .collect()
 }
+
+

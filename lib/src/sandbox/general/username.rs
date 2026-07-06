@@ -4,6 +4,7 @@ use tokio::sync::Mutex;
 use crate::sandbox::*;
 use crate::{action};
 use regex::Regex;
+use crate::utils::sys::get_username_sysapi;
 
 static USERNAME_PATTERNS: LazyLock<UsernamePatterns> = LazyLock::new(UsernamePatterns::new);
 
@@ -68,68 +69,6 @@ fn is_running_on_desktop() -> bool {
     false
 }
 
-#[cfg(windows)]
-fn get_systemapi_user() -> Option<HeapStr> {
-    use std::os::windows::ffi::OsStringExt;
-
-    #[allow(non_snake_case)]
-    unsafe extern "system" {
-        fn GetUserNameW(lpBuffer: *mut u16, pcbBuffer: *mut u32) -> i32;
-    }
-
-    let mut buf = vec![0u16; 512];
-    let mut size = buf.len() as u32;
-
-    unsafe {
-        if GetUserNameW(buf.as_mut_ptr(), &mut size) != 0 && size > 0 {
-            let len = (size - 1) as usize;
-            let string_val = std::ffi::OsString::from_wide(&buf[..len])
-                .to_string_lossy()
-                .into_owned();
-            return Some(HeapStr::from(string_val));
-        }
-    }
-    None
-}
-
-#[cfg(unix)]
-fn get_systemapi_user() -> Option<HeapStr> {
-    use std::ffi::CStr;
-
-    unsafe {
-        let uid = libc::getuid();
-
-        let mut pwd: libc::passwd = std::mem::zeroed();
-        let mut pwd_result: *mut libc::passwd = std::ptr::null_mut();
-
-        let buf_size = libc::sysconf(libc::_SC_GETPW_R_SIZE_MAX);
-        let buf_size = if buf_size == -1 { 1024 } else { buf_size as usize };
-        let mut buf: Vec<libc::c_char> = vec![0; buf_size];
-
-        let status = libc::getpwuid_r(
-            uid,
-            &mut pwd,
-            buf.as_mut_ptr(),
-            buf.len(),
-            &mut pwd_result,
-        );
-
-        if status == 0 && !pwd_result.is_null() {
-            let name_ptr = (*pwd_result).pw_name;
-            if !name_ptr.is_null() {
-                if let Ok(s) = CStr::from_ptr(name_ptr).to_str() {
-                    return Some(HeapStr::from(s));
-                }
-            }
-        }
-    }
-    None
-}
-
-#[cfg(not(any(windows, unix)))]
-fn get_systemapi_user() -> Option<HeapStr> {
-    None
-}
 
 // -----------------------------------------------------------
 
@@ -247,10 +186,10 @@ pub async fn check_username(env: Arc<Mutex<Environment>>) {
     }
 
     // 2. 获取系统API返回的用户名
-    let systemapi_user_opt = get_systemapi_user();
+    let systemapi_user_opt = get_username_sysapi();
 
     // Anti-Hook 检测 - 系统API
-    if systemapi_user_opt != get_systemapi_user() {
+    if systemapi_user_opt != get_username_sysapi() {
         env.lock().await.add(action!(
             AbnormalType::Inconsistent,
             ScoreType::OtherSystemApi,
@@ -437,7 +376,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_systemapi_user() {
-        println!("SystemAPI user: {:?}", get_systemapi_user());
+        println!("SystemAPI user: {:?}", get_username_sysapi());
     }
 
     #[tokio::test]

@@ -6,73 +6,9 @@ use std::str::FromStr;
 use std::sync::LazyLock;
 use tokio::fs as tokio_fs;
 use tokio::io::AsyncReadExt;
+use crate::utils::tlsh::{tlsh_hash, tlsh_to_string};
 
-static HOME: LazyLock<String> = LazyLock::new(|| {
-    std_env::var(ss!("HOME"))
-        .or_else(|_| std_env::var(ss!("USERPROFILE")))
-        .unwrap_or_else(|_| "/".to_string()).into()
-});
 
-static APPDATA: LazyLock<String> = LazyLock::new(|| {
-    std_env::var(ss!("APPDATA"))
-        .unwrap_or_else(|_| s_add!(HOME.as_str(), r"\AppData\Roaming").into_string())
-});
-
-static LOCALAPPDATA: LazyLock<String> = LazyLock::new(|| {
-    std_env::var(ss!("LOCALAPPDATA"))
-        .unwrap_or_else(|_| s_add!(HOME.as_str(), r"\AppData\Local").into_string())
-});
-
-static DESKTOP: LazyLock<String> = LazyLock::new(|| {
-    s_add!(HOME.as_str(), r"\Desktop").into_string()
-});
-
-static SYS_DRIVE: LazyLock<String> = LazyLock::new(|| {
-    std_env::var(ss!("SystemDrive")).unwrap_or_else(|_| "C:".to_string())
-});
-
-static WINDIR: LazyLock<String> = LazyLock::new(|| {
-    std_env::var(ss!("windir")).unwrap_or_else(|_| s_add!(SYS_DRIVE.as_str(), r"\Windows").into_string())
-});
-
-static PROGRAMDATA: LazyLock<String> = LazyLock::new(|| {
-    std_env::var(ss!("ProgramData")).unwrap_or_else(|_| s_add!(SYS_DRIVE.as_str(), r"\ProgramData").into_string())
-});
-
-static PROG_FILES: LazyLock<String> = LazyLock::new(|| {
-    std_env::var(ss!("ProgramFiles")).unwrap_or_else(|_| s_add!(SYS_DRIVE.as_str(), r"\Program Files").into_string())
-});
-
-static PROG_FILES_X86: LazyLock<String> = LazyLock::new(|| {
-    std_env::var(ss!("ProgramFiles(x86)")).unwrap_or_else(|_| s_add!(SYS_DRIVE.as_str(), r"\Program Files (x86)").into_string())
-});
-
-pub(crate) static SYSTEM32: LazyLock<String> = LazyLock::new(|| {
-    s_add!(WINDIR.as_str(), r"\System32").into_string()
-});
-
-static SYSWOW64: LazyLock<String> = LazyLock::new(|| {
-    s_add!(WINDIR.as_str(), r"\SysWOW64").into_string()
-});
-
-pub(crate) static TEMP: LazyLock<String> = LazyLock::new(|| {
-    std_env::var(ss!("TEMP"))
-        .or_else(|_| std_env::var(ss!("TMP")))
-        .unwrap_or_else(|_| {
-            #[cfg(windows)]
-            { s_add!(LOCALAPPDATA.as_str(), r"\Temp").to_string() }
-            #[cfg(unix)]
-            { sss!("/tmp") }
-        })
-});
-
-static USERS: LazyLock<String> = LazyLock::new(|| {
-    if cfg!(windows) {
-        std_env::var(ss!("PUBLIC")).unwrap_or_else(|_| s_add!(SYS_DRIVE.as_str(), r"\Users\Public").into_string())
-    } else if cfg!(target_os = "linux") {
-        sss!(r"/home")
-    } else { sss!("/Users") }
-});
 
 pub(crate) async fn __has_file(path: impl Str, min_size: Option<u64>, mut action: ScoreAction) -> Option<ScoreAction> {
     if let Ok(meta) = tokio_fs::symlink_metadata(path.as_str()).await {
@@ -206,28 +142,21 @@ pub async fn __image_diff(
     }
 }
 
-async fn ___tlsh_file(file: &str) -> Option<tlsh2::Tlsh128_1> {
-    let mut file = tokio_fs::File::open(file).await.ok()?;
-    let mut builder = tlsh2::TlshDefaultBuilder::new();
-    let mut buf = [0u8; 8192];
-    loop {
-        let n = file.read(&mut buf).await.ok()?;
-        if n == 0 {
-            break;
-        }
 
-        builder.update(&buf[..n]);
-    }
-    let hash = builder.build()?;
-    Some(hash)
+
+async fn ___tlsh_file(file: &str) -> Option<tlsh2::Tlsh128_1> {
+    let data = tokio_fs::read(file).await.ok()?;
+    tlsh_hash(data).await
 }
+
 pub async fn ___tlsh_file_string(file: &str) -> Option<String> {
-    Option::from(String::from_utf8_lossy(&___tlsh_file(file).await?.hash()).into_owned())
+    ___tlsh_file(file).await.map(tlsh_to_string)
 }
+
 pub async fn ___tlsh_image(img: image::DynamicImage) -> Option<tlsh2::Tlsh128_1> {
     use image::imageops::FilterType;
 
-    tokio::task::spawn_blocking(move || {
+    let processed = tokio::task::spawn_blocking(move || {
         const WIDTH: usize = 128;
         const HEIGHT: usize = 128;
         const PIXELS: usize = WIDTH * HEIGHT;
@@ -249,12 +178,12 @@ pub async fn ___tlsh_image(img: image::DynamicImage) -> Option<tlsh2::Tlsh128_1>
             processed[PIXELS * 2 + i] = chunk[2] >> 3;
         }
 
-        let mut builder = tlsh2::TlshDefaultBuilder::new();
-        builder.update(&processed);
-        builder.build()
+        processed
     })
         .await
-        .ok()?
+        .ok()?;
+
+    tlsh_hash(processed).await
 }
 
 /// 收集目录下的子项名称，排序后转为 Vec<u8>，然后用 TLSH 比较
@@ -302,15 +231,13 @@ async fn ___tlsh_dir(dir: &str) -> Option<tlsh2::Tlsh128_1> {
     names.sort();
 
     let data = names.join("\n").into_bytes();
-
-    let mut builder = tlsh2::TlshDefaultBuilder::new();
-    builder.update(&data);
-    builder.build()
+    tlsh_hash(data).await
 }
 
 pub async fn ___tlsh_dir_string(dir: &str) -> Option<String> {
-    Option::from(String::from_utf8_lossy(&___tlsh_dir(dir).await?.hash()).into_owned())
+    ___tlsh_dir(dir).await.map(tlsh_to_string)
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,6 +245,7 @@ mod tests {
     use tokio::io::AsyncWriteExt;
     use std::time::{SystemTime, UNIX_EPOCH};
     use crate::action;
+    use crate::utils::sys::TEMP;
 
     fn mock_action() -> ScoreAction {
         action!(SandboxType::Unknown, ScoreType::File, 0, 0.0)
@@ -338,25 +266,25 @@ mod tests {
         let file_path = temp_dir.join("test_file.txt");
         let file_path_str = file_path.to_str().unwrap().to_string();
 
-        
+
         let mut file = tokio_fs::File::create(&file_path).await.unwrap();
         file.write_all(&vec![0u8; 2048]).await.unwrap();
 
         let action = mock_action();
 
-        
+
         let res_dir = __has_dir(HeapStr::new(temp_dir.to_string_lossy().as_ref()), action.clone()).await;
         assert!(res_dir.is_some(), "临时目录应该被识别到");
 
-        
+
         let res_file1 = __has_file(HeapStr::new(file_path_str.as_str()), None, action.clone()).await;
         assert!(res_file1.is_some(), "文件应该存在");
 
-        
+
         let res_file2 = __has_file(HeapStr::new(file_path_str.as_str()), Some(1024), action.clone()).await;
         assert!(res_file2.is_some(), "文件大小 2048 >= 1024，应该匹配成功");
 
-        
+
         let res_file3 = __has_file(HeapStr::new(file_path_str), Some(4096), action.clone()).await;
         assert!(res_file3.is_none(), "文件大小 2048 < 4096，不应匹配");
     }
@@ -366,8 +294,8 @@ mod tests {
         let temp_dir = std::path::Path::new(&*TEMP).join("test_dir_subitem_count").join(format!("{}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
         let dir_path = temp_dir.to_str().unwrap().to_string();
         tokio_fs::create_dir_all(&dir_path).await.unwrap();
-        
-        
+
+
         for i in 0..3 {
             let fp = temp_dir.join(format!("file_{}.txt", i));
             tokio_fs::File::create(fp).await.unwrap();
@@ -375,17 +303,17 @@ mod tests {
 
         let action = mock_action();
 
-        
-        
+
+
         let res_few_match = __dir_subitem_few(HeapStr::new(dir_path.as_str()), vec![(5, action.clone())]).await;
         assert!(res_few_match.is_some(), "文件数较少，应该匹配成功");
 
-        
+
         let res_few_unmatch = __dir_subitem_few(HeapStr::new(dir_path.as_str()), vec![(2, action.clone())]).await;
         assert!(res_few_unmatch.is_none(), "文件数超标，不应触发 few");
 
-        
-        
+
+
         let res_rich_match = __dir_subitem_rich(HeapStr::new(dir_path.as_str()), vec![(2, action.clone())]).await;
         assert!(res_rich_match.is_some(), "文件数足够多，应该匹配成功");
 
@@ -400,25 +328,25 @@ mod tests {
         let file_path = temp_dir.join("tlsh_target.bin");
         let file_path_str = file_path.to_str().unwrap().to_string();
 
-        
+
         let data = generate_entropy_data(4096);
         let mut file = tokio_fs::File::create(&file_path).await.unwrap();
         file.write_all(&data).await.unwrap();
-        file.sync_all().await.unwrap(); 
+        file.sync_all().await.unwrap();
 
-        
+
         let hash_opt = ___tlsh_file(&file_path_str).await;
         assert!(hash_opt.is_some(), "TLSH 哈希生成失败，可能是文件太小或熵值过低");
 
         let hash = hash_opt.unwrap();
         let hash_str = String::from_utf8_lossy(&hash.hash()).into_owned();
 
-        
+
         let action = mock_action();
         let diff_match = __file_diff(HeapStr::new(file_path_str.as_str()), HeapStr::new(hash_str.as_str()), 10, action.clone()).await;
         assert!(diff_match.is_some(), "使用同样的 TLSH 字符串进行比较，应该匹配成功");
 
-        
+
         let fake_tlsh = "T12E41C011EB14EA9B091F89292F78594C17FB40183A9372A7F14E169C4B05B0D276FFE8";
         let diff_unmatch = __file_diff(HeapStr::new(file_path_str.as_str()), HeapStr::new(fake_tlsh), 10, action.clone()).await;
         assert!(diff_unmatch.is_none(), "使用截然不同的 TLSH 进行比较，距离应该大于 10，返回 None");

@@ -4,50 +4,7 @@ use tokio::sync::Mutex;
 use crate::sandbox::*;
 use crate::action;
 use regex::Regex;
-
-#[cfg(windows)]
-fn get_systemapi_hostname() -> Option<HeapStr> {
-    use std::os::windows::ffi::OsStringExt;
-
-    #[allow(non_snake_case)]
-    unsafe extern "system" {
-        fn GetComputerNameW(lpBuffer: *mut u16, lpnSize: *mut u32) -> i32;
-    }
-
-    let mut buf = vec![0u16; 256];
-    let mut size = buf.len() as u32;
-
-    unsafe {
-        if GetComputerNameW(buf.as_mut_ptr(), &mut size) != 0 && size > 0 {
-            let string_val = std::ffi::OsString::from_wide(&buf[..size as usize])
-                .to_string_lossy()
-                .into_owned();
-            return Some(HeapStr::from(string_val));
-        }
-    }
-    None
-}
-
-#[cfg(unix)]
-fn get_systemapi_hostname() -> Option<HeapStr> {
-    let mut buf = vec![0u8; 256];
-    unsafe {
-        if libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len()) == 0 {
-            if let Some(pos) = buf.iter().position(|&x| x == 0) {
-                if let Ok(s) = std::str::from_utf8(&buf[..pos]) {
-                    return Some(HeapStr::from(s));
-                }
-            }
-        }
-    }
-    None
-}
-
-#[cfg(not(any(windows, unix)))]
-fn get_systemapi_hostname() -> Option<HeapStr> {
-    None
-}
-
+use crate::utils::sys::get_hostname_sysapi;
 // -----------------------------------------------------------
 
 pub async fn check_hostname(env: Arc<Mutex<Environment>>) {
@@ -68,9 +25,9 @@ pub async fn check_hostname(env: Arc<Mutex<Environment>>) {
         ));
     }
 
-    let sys_host_opt = get_systemapi_hostname();
+    let sys_host_opt = get_hostname_sysapi();
 
-    if sys_host_opt != get_systemapi_hostname() {
+    if sys_host_opt != get_hostname_sysapi() {
         env.lock().await.add(action!(
             AbnormalType::Inconsistent,
             ScoreType::OtherSystemApi,

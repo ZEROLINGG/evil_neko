@@ -1,4 +1,5 @@
-use crate::utils::win::{reg::*, resolve, win_types::registry};
+#![cfg(windows)]
+pub use crate::utils::win::{reg::*, resolve, win_types::registry};
 use std::ffi::c_void;
 use std::fmt;
 
